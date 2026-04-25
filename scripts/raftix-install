@@ -7,7 +7,6 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 TARGET=/mnt
 CRYPT_ROOT=raftix-root
-CRYPT_SWAP=raftix-swap
 CONFIG_REPO=https://github.com/rafaelrene/dotforge
 
 USERNAME=
@@ -15,13 +14,11 @@ HOSTNAME=
 CPU_VENDOR=
 GPU_VENDOR=
 POWER_MODE=
-HIBERNATE=no
 ESP_PART=
 ROOT_PART=
-SWAP_PART=
 
 require_installer_tools() {
-	local tools=(artix-chroot basestrap blkid btrfs cfdisk cryptsetup dialog fstabgen git lsblk mkfs.btrfs mkfs.fat mkswap mount pacman ping sed swapon)
+	local tools=(artix-chroot basestrap blkid btrfs cfdisk cryptsetup dialog fstabgen git lsblk mkfs.btrfs mkfs.fat mount pacman ping sed)
 	for tool in "${tools[@]}"; do
 		require_cmd "$tool"
 	done
@@ -46,12 +43,6 @@ ask_profile() {
 	CPU_VENDOR="$(dialog_menu "CPU" "Select microcode package" intel "Intel" amd "AMD" none "None")"
 	GPU_VENDOR="$(dialog_menu "GPU" "Select GPU driver set" intel "Intel" amd "AMD" nvidia "NVIDIA" none "None")"
 	POWER_MODE="$(dialog_menu "Power" "Select power management profile" standard "Standard/desktop/VM" laptop "Laptop/TLP" none "None")"
-
-	if dialog_yesno "Hibernate" "Create and configure encrypted swap partition for hibernate?"; then
-		HIBERNATE=yes
-	else
-		HIBERNATE=no
-	fi
 }
 
 check_network() {
@@ -85,11 +76,8 @@ partition_target() {
 
 	ESP_PART="$(select_partition "EFI" "Select EFI system partition")"
 	ROOT_PART="$(select_partition "Root" "Select root partition. This partition will be LUKS formatted.")"
-	if [[ "$HIBERNATE" == yes ]]; then
-		SWAP_PART="$(select_partition "Swap" "Select swap partition. This partition will be LUKS formatted.")"
-	fi
 
-	dialog_yesno "Confirm destructive format" "Format selected partitions?\n\nESP: $ESP_PART\nRoot: $ROOT_PART\nSwap: ${SWAP_PART:-none}" || die "cancelled"
+	dialog_yesno "Confirm destructive format" "Format selected partitions?\n\nESP: $ESP_PART\nRoot: $ROOT_PART" || die "cancelled"
 }
 
 mount_btrfs() {
@@ -117,12 +105,6 @@ format_and_mount() {
 	run mkfs.btrfs -f "/dev/mapper/$CRYPT_ROOT"
 	mount_btrfs
 
-	if [[ "$HIBERNATE" == yes ]]; then
-		run cryptsetup luksFormat "$SWAP_PART"
-		run cryptsetup open "$SWAP_PART" "$CRYPT_SWAP"
-		run mkswap "/dev/mapper/$CRYPT_SWAP"
-		run swapon "/dev/mapper/$CRYPT_SWAP"
-	fi
 }
 
 repo_packages() {
@@ -145,9 +127,30 @@ repo_packages() {
 }
 
 install_base() {
-	mapfile -t packages < <(repo_packages | sort -u)
+	local packages=(base linux linux-firmware openrc btrfs-progs cryptsetup dialog git grub mkinitcpio networkmanager sudo)
 	run basestrap "$TARGET" "${packages[@]}"
 	fstabgen -U "$TARGET" >>"$TARGET/etc/fstab"
+}
+
+configure_arch_repos() {
+	local pacman_conf="$TARGET/etc/pacman.conf"
+	chroot_run "$TARGET" pacman -S --needed --noconfirm artix-archlinux-support
+	chroot_run "$TARGET" pacman-key --populate archlinux || true
+
+	if ! grep -q '^\[extra\]' "$pacman_conf"; then
+		cat >>"$pacman_conf" <<'EOF'
+
+[extra]
+Include = /etc/pacman.d/mirrorlist-arch
+EOF
+	fi
+
+	chroot_run "$TARGET" pacman -Sy --noconfirm
+}
+
+install_repo_packages() {
+	mapfile -t packages < <(repo_packages | sort -u)
+	chroot_run "$TARGET" pacman -S --needed --noconfirm "${packages[@]}"
 }
 
 configure_base() {
@@ -227,6 +230,8 @@ install_dotforge() {
 	chroot_run "$TARGET" sudo -u "$USERNAME" git clone "$CONFIG_REPO" "$home/dotforge"
 	if [[ -x "$TARGET$home/dotforge/install.sh" ]]; then
 		chroot_run "$TARGET" sudo -u "$USERNAME" "$home/dotforge/install.sh"
+	else
+		dialog_msg "dotforge" "dotforge install.sh is missing or not executable. Config files were not installed."
 	fi
 
 	restore_ssh "$home"
@@ -272,6 +277,8 @@ main() {
 	partition_target
 	format_and_mount
 	install_base
+	configure_arch_repos
+	install_repo_packages
 	configure_base
 	configure_users
 	enable_install_sudo

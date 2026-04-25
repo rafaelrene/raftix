@@ -31,7 +31,7 @@ Current focus: implementation.
 - Encryption: full disk encryption by default.
 - Init system: OpenRC.
 - Bootloader: GRUB.
-- Swap: zram by default; optional encrypted swap partition when hibernate is selected.
+- Swap: zram by default; encrypted hibernate deferred.
 - Encryption unlock: passphrase only.
 - Snapshots: automatic, with retention limits so they do not consume excessive disk space.
 - Btrfs layout: `@`, `@home`, `@snapshots`, `@var_log`, `@cache`.
@@ -45,6 +45,7 @@ Current focus: implementation.
 - Installer scope: Proxmox VM first, real hardware later.
 - Internet: required during installation.
 - Package installation: repo and AUR packages are installed/built live during installation.
+- Arch package support: enable Arch `extra` through `artix-archlinux-support`.
 - AUR packages: allowed.
 - AUR strategy: build selected AUR packages live during installation.
 - Firewall: UFW enabled by default.
@@ -140,7 +141,7 @@ Current focus: implementation.
 - AUR helper: paru.
 - Mirrors: rank mirrors during installation.
 - Maintenance commands: `raftix update`, `raftix clean`, `raftix doctor`.
-- Mirror ranking: rank Artix mirrors; also rank Arch mirrors if Arch repos are enabled.
+- Mirror ranking: rank Artix mirrors; also rank Arch mirrors because Arch `extra` is enabled.
 - Cache cleanup: keep latest 2 versions of installed packages, 0 versions of uninstalled packages; remove paru build cache during `raftix clean`.
 - ISO artifact naming: `raftix-YYYY.MM.DD-x86_64.iso`.
 - Versioning: date-based.
@@ -184,7 +185,6 @@ Current focus: implementation.
 ### 3. Installer Flow
 
 - Validate exact Artix package/service names on a Linux/Artix build host.
-- Validate encrypted hibernate implementation.
 
 ### 4. System Defaults
 

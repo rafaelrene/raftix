@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PVE_HOST="${PVE_HOST:-root@pve}"
+VMID="${VMID:-9000}"
+NAME="${NAME:-raftix-build}"
+MEMORY="${MEMORY:-16384}"
+CORES="${CORES:-8}"
+DISK_SIZE="${DISK_SIZE:-100}"
+STORAGE="${STORAGE:-local-lvm}"
+BRIDGE="${BRIDGE:-vmbr0}"
+ISO_STORAGE="${ISO_STORAGE:-local}"
+ISO_IMAGE="${ISO_IMAGE:-artix-base-openrc.iso}"
+
+die() {
+	printf 'error: %s\n' "$*" >&2
+	exit 1
+}
+
+need_var() {
+	local name="$1"
+	local value="$2"
+	[[ -n "$value" ]] || die "set $name"
+}
+
+main() {
+	need_var VMID "$VMID"
+	need_var STORAGE "$STORAGE"
+	need_var ISO_IMAGE "$ISO_IMAGE"
+	DISK_SIZE="${DISK_SIZE%G}"
+	DISK_SIZE="${DISK_SIZE%g}"
+
+	if ssh "$PVE_HOST" qm status -- "$VMID" >/dev/null 2>&1; then
+		die "VM $VMID already exists on $PVE_HOST"
+	fi
+
+	ssh "$PVE_HOST" qm create "$VMID" \
+		--name "$NAME" \
+		--memory "$MEMORY" \
+		--cores "$CORES" \
+		--cpu host \
+		--machine q35 \
+		--bios ovmf \
+		--efidisk0 "$STORAGE:0,efitype=4m,pre-enrolled-keys=0" \
+		--net0 "virtio,bridge=$BRIDGE" \
+		--scsihw virtio-scsi-single \
+		--scsi0 "$STORAGE:$DISK_SIZE" \
+		--ide2 "$ISO_STORAGE:iso/$ISO_IMAGE,media=cdrom" \
+		--boot order=ide2 \
+		--ostype l26 \
+		--agent enabled=1
+}
+
+main "$@"

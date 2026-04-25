@@ -1,4 +1,5 @@
 age
+artix-archlinux-support
 base
 base-devel
 bat
@@ -32,6 +33,7 @@ jq
 linux
 linux-firmware
 loupe
+mkinitcpio
 mako
 mise
 mpv
