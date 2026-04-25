@@ -1,0 +1,22 @@
+[Default Applications]
+application/pdf=zen-browser.desktop
+application/x-7z-compressed=org.gnome.FileRoller.desktop
+application/x-bzip2=org.gnome.FileRoller.desktop
+application/x-gzip=org.gnome.FileRoller.desktop
+application/x-tar=org.gnome.FileRoller.desktop
+application/zip=org.gnome.FileRoller.desktop
+audio/flac=mpv.desktop
+audio/mpeg=mpv.desktop
+audio/ogg=mpv.desktop
+audio/wav=mpv.desktop
+image/jpeg=org.gnome.Loupe.desktop
+image/png=org.gnome.Loupe.desktop
+image/webp=org.gnome.Loupe.desktop
+inode/directory=org.gnome.Nautilus.desktop
+text/html=zen-browser.desktop
+text/plain=cursor.desktop
+video/mp4=mpv.desktop
+video/ogg=mpv.desktop
+video/webm=mpv.desktop
+x-scheme-handler/http=zen-browser.desktop
+x-scheme-handler/https=zen-browser.desktop

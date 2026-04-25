@@ -7,13 +7,12 @@ prettier = "3.8.3"
 shellcheck = "0.11.0"
 shfmt = "3.13.1"
 taplo = "0.10.0"
-task = "3.50.0"
 yq = "4.53.2"
 
 [tasks.fmt]
 description = "Format project files"
 run = [
-  "sh -c 'files=$(find . -type f -name \"*.sh\" -not -path \"./.git/*\"); test -z \"$files\" || shfmt -w $files'",
+  "shfmt -w scripts/raftix scripts/raftix-install scripts/build-iso scripts/lib/common.sh",
   "taplo format .mise.toml",
   "prettier --write \"**/*.{md,yml,yaml,json}\"",
 ]
@@ -21,7 +20,7 @@ run = [
 [tasks.lint]
 description = "Lint project files"
 run = [
-  "sh -c 'files=$(find . -type f -name \"*.sh\" -not -path \"./.git/*\"); test -z \"$files\" || shellcheck $files'",
+  "shellcheck scripts/raftix scripts/raftix-install scripts/build-iso scripts/lib/common.sh",
   "taplo check .mise.toml",
   "markdownlint-cli2 \"**/*.md\"",
   "prettier --check \"**/*.{md,yml,yaml,json}\"",
@@ -29,4 +28,11 @@ run = [
 
 [tasks.test]
 description = "Run tests"
-run = "sh -c 'test ! -d tests || bats tests'"
+run = [
+  "bash -n scripts/raftix scripts/raftix-install scripts/build-iso scripts/lib/common.sh",
+  "sh -c 'test ! -d tests || bats tests'",
+]
+
+[tasks.build-iso]
+description = "Build ISO"
+run = ["./scripts/build-iso"]

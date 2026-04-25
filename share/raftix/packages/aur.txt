@@ -1,0 +1,4 @@
+cursor-bin
+helium-browser-bin
+vicinae-bin
+zen-browser-bin

@@ -1,0 +1,16 @@
+boot
+network
+disk-encryption
+grub
+user-login
+niri
+ghostty
+vicinae
+waybar
+audio
+bluetooth
+ssh
+zen
+snapshots
+raftix-update
+screenshot-clipboard

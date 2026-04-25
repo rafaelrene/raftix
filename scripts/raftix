@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+	printf 'error: %s\n' "$*" >&2
+	exit 1
+}
+
+need() {
+	command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+snapshot() {
+	if command -v snapper >/dev/null 2>&1; then
+		sudo snapper create --description "$1"
+	fi
+}
+
+update_system() {
+	need paru
+	snapshot "before raftix update"
+	paru -Syu
+	clean_system
+}
+
+clean_system() {
+	if command -v paccache >/dev/null 2>&1; then
+		sudo paccache -rk2
+		sudo paccache -ruk0
+	fi
+	rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/paru"
+}
+
+doctor() {
+	local failed=0
+	local commands=(paru snapper niri ghostty zen-browser sshd NetworkManager)
+	for command in "${commands[@]}"; do
+		if ! command -v "$command" >/dev/null 2>&1; then
+			printf 'missing: %s\n' "$command"
+			failed=1
+		fi
+	done
+
+	if ! sudo ufw status >/dev/null 2>&1; then
+		printf 'ufw: not healthy\n'
+		failed=1
+	fi
+
+	if ! snapper list >/dev/null 2>&1; then
+		printf 'snapper: not healthy\n'
+		failed=1
+	fi
+
+	return "$failed"
+}
+
+usage() {
+	cat <<'EOF'
+usage: raftix <command>
+
+commands:
+  update   snapshot, update repo/AUR packages with paru, clean cache
+  clean    clean package and paru build caches
+  doctor   run basic installed-system checks
+EOF
+}
+
+case "${1:-}" in
+update) update_system ;;
+clean) clean_system ;;
+doctor) doctor ;;
+"" | -h | --help) usage ;;
+*) die "unknown command: $1" ;;
+esac

@@ -1,0 +1,4 @@
+intel-media-driver
+mesa
+vulkan-intel
+xf86-video-intel

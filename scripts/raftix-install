@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
+TARGET=/mnt
+CRYPT_ROOT=raftix-root
+CRYPT_SWAP=raftix-swap
+CONFIG_REPO=https://github.com/rafaelrene/dotforge
+
+USERNAME=
+HOSTNAME=
+CPU_VENDOR=
+GPU_VENDOR=
+POWER_MODE=
+HIBERNATE=no
+ESP_PART=
+ROOT_PART=
+SWAP_PART=
+
+require_installer_tools() {
+	local tools=(artix-chroot basestrap blkid btrfs cfdisk cryptsetup dialog fstabgen git lsblk mkfs.btrfs mkfs.fat mkswap mount pacman ping sed swapon)
+	for tool in "${tools[@]}"; do
+		require_cmd "$tool"
+	done
+}
+
+select_partition() {
+	local title="$1"
+	local prompt="$2"
+	local entries=()
+	local name size fstype
+
+	while read -r name size fstype; do
+		entries+=("/dev/$name" "$size ${fstype:-unformatted}")
+	done < <(lsblk -lnpo NAME,SIZE,FSTYPE | sed 's#^/dev/##')
+
+	dialog_menu "$title" "$prompt" "${entries[@]}"
+}
+
+ask_profile() {
+	USERNAME="$(dialog_input "User" "Username")"
+	HOSTNAME="$(dialog_input "Host" "Hostname")"
+	CPU_VENDOR="$(dialog_menu "CPU" "Select microcode package" intel "Intel" amd "AMD" none "None")"
+	GPU_VENDOR="$(dialog_menu "GPU" "Select GPU driver set" intel "Intel" amd "AMD" nvidia "NVIDIA" none "None")"
+	POWER_MODE="$(dialog_menu "Power" "Select power management profile" standard "Standard/desktop/VM" laptop "Laptop/TLP" none "None")"
+
+	if dialog_yesno "Hibernate" "Create and configure encrypted swap partition for hibernate?"; then
+		HIBERNATE=yes
+	else
+		HIBERNATE=no
+	fi
+}
+
+check_network() {
+	ping -c 1 artixlinux.org >/dev/null 2>&1 || die "network required: cannot reach artixlinux.org"
+}
+
+rank_mirrors() {
+	if command -v artix-rankmirrors >/dev/null 2>&1; then
+		run artix-rankmirrors
+	elif command -v rankmirrors >/dev/null 2>&1 && [[ -f /etc/pacman.d/mirrorlist ]]; then
+		run sh -c 'rankmirrors -n 10 /etc/pacman.d/mirrorlist >/tmp/mirrorlist && cp /tmp/mirrorlist /etc/pacman.d/mirrorlist'
+	fi
+
+	if command -v reflector >/dev/null 2>&1 && [[ -f /etc/pacman.d/mirrorlist-arch ]]; then
+		run reflector --latest 20 --sort rate --save /etc/pacman.d/mirrorlist-arch
+	fi
+}
+
+partition_target() {
+	local disk
+	local entries=()
+	local name size model
+
+	while read -r name size model; do
+		entries+=("$name" "$size $model")
+	done < <(lsblk -dnpo NAME,SIZE,MODEL)
+
+	disk="$(dialog_menu "Disk" "Select disk to partition" "${entries[@]}")"
+	dialog_msg "Partitioning" "cfdisk will open for $disk. Create/select an EFI system partition, encrypted root partition, and optional swap partition."
+	run cfdisk "$disk"
+
+	ESP_PART="$(select_partition "EFI" "Select EFI system partition")"
+	ROOT_PART="$(select_partition "Root" "Select root partition. This partition will be LUKS formatted.")"
+	if [[ "$HIBERNATE" == yes ]]; then
+		SWAP_PART="$(select_partition "Swap" "Select swap partition. This partition will be LUKS formatted.")"
+	fi
+
+	dialog_yesno "Confirm destructive format" "Format selected partitions?\n\nESP: $ESP_PART\nRoot: $ROOT_PART\nSwap: ${SWAP_PART:-none}" || die "cancelled"
+}
+
+mount_btrfs() {
+	run mount "/dev/mapper/$CRYPT_ROOT" "$TARGET"
+	run btrfs subvolume create "$TARGET/@"
+	run btrfs subvolume create "$TARGET/@home"
+	run btrfs subvolume create "$TARGET/@snapshots"
+	run btrfs subvolume create "$TARGET/@var_log"
+	run btrfs subvolume create "$TARGET/@cache"
+	run umount "$TARGET"
+
+	run mount -o noatime,compress=zstd,subvol=@ "/dev/mapper/$CRYPT_ROOT" "$TARGET"
+	run mkdir -p "$TARGET"/{boot,home,.snapshots,var/log,var/cache}
+	run mount -o noatime,compress=zstd,subvol=@home "/dev/mapper/$CRYPT_ROOT" "$TARGET/home"
+	run mount -o noatime,compress=zstd,subvol=@snapshots "/dev/mapper/$CRYPT_ROOT" "$TARGET/.snapshots"
+	run mount -o noatime,compress=zstd,subvol=@var_log "/dev/mapper/$CRYPT_ROOT" "$TARGET/var/log"
+	run mount -o noatime,compress=zstd,subvol=@cache "/dev/mapper/$CRYPT_ROOT" "$TARGET/var/cache"
+	run mount "$ESP_PART" "$TARGET/boot"
+}
+
+format_and_mount() {
+	run mkfs.fat -F32 "$ESP_PART"
+	run cryptsetup luksFormat "$ROOT_PART"
+	run cryptsetup open "$ROOT_PART" "$CRYPT_ROOT"
+	run mkfs.btrfs -f "/dev/mapper/$CRYPT_ROOT"
+	mount_btrfs
+
+	if [[ "$HIBERNATE" == yes ]]; then
+		run cryptsetup luksFormat "$SWAP_PART"
+		run cryptsetup open "$SWAP_PART" "$CRYPT_SWAP"
+		run mkswap "/dev/mapper/$CRYPT_SWAP"
+		run swapon "/dev/mapper/$CRYPT_SWAP"
+	fi
+}
+
+repo_packages() {
+	read_list "$SHARE_DIR/packages/repo.txt"
+
+	case "$CPU_VENDOR" in
+	amd) read_list "$SHARE_DIR/packages/optional-amd.txt" ;;
+	esac
+
+	case "$GPU_VENDOR" in
+	amd) read_list "$SHARE_DIR/packages/optional-gpu-amd.txt" ;;
+	intel) read_list "$SHARE_DIR/packages/optional-gpu-intel.txt" ;;
+	nvidia) read_list "$SHARE_DIR/packages/optional-gpu-nvidia.txt" ;;
+	esac
+
+	case "$POWER_MODE" in
+	laptop) read_list "$SHARE_DIR/packages/optional-power-laptop.txt" ;;
+	standard) read_list "$SHARE_DIR/packages/optional-power-standard.txt" ;;
+	esac
+}
+
+install_base() {
+	mapfile -t packages < <(repo_packages | sort -u)
+	run basestrap "$TARGET" "${packages[@]}"
+	fstabgen -U "$TARGET" >>"$TARGET/etc/fstab"
+}
+
+configure_base() {
+	copy_file "$SHARE_DIR/config/environment" "$TARGET/etc/environment"
+	printf '%s\n' "$HOSTNAME" >"$TARGET/etc/hostname"
+	printf 'LANG=en_US.UTF-8\n' >"$TARGET/etc/locale.conf"
+	append_once "en_US.UTF-8 UTF-8" "$TARGET/etc/locale.gen"
+	chroot_run "$TARGET" locale-gen
+	chroot_run "$TARGET" ln -sf /usr/share/zoneinfo/Europe/Bratislava /etc/localtime
+	chroot_run "$TARGET" hwclock --systohc
+	printf 'KEYMAP=us\n' >"$TARGET/etc/vconsole.conf"
+}
+
+configure_users() {
+	chroot_run "$TARGET" useradd -m -G wheel,audio,video,input,lp,scanner,storage -s /usr/bin/nu "$USERNAME"
+	dialog_msg "Password" "Set root password next."
+	chroot_run "$TARGET" passwd
+	dialog_msg "Password" "Set password for $USERNAME next."
+	chroot_run "$TARGET" passwd "$USERNAME"
+	append_once '%wheel ALL=(ALL:ALL) ALL' "$TARGET/etc/sudoers"
+}
+
+enable_install_sudo() {
+	printf '%%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n' >"$TARGET/etc/sudoers.d/raftix-install"
+	chmod 440 "$TARGET/etc/sudoers.d/raftix-install"
+}
+
+disable_install_sudo() {
+	rm -f "$TARGET/etc/sudoers.d/raftix-install"
+}
+
+configure_services() {
+	local services=(NetworkManager ufw chronyd bluetooth cupsd sshd greetd zramen)
+	for service in "${services[@]}"; do
+		chroot_run "$TARGET" rc-update add "$service" default || true
+	done
+
+	case "$POWER_MODE" in
+	laptop) chroot_run "$TARGET" rc-update add tlp default || true ;;
+	standard) chroot_run "$TARGET" rc-update add power-profiles-daemon default || true ;;
+	esac
+}
+
+configure_snapper() {
+	chroot_run "$TARGET" snapper -c root create-config /
+	copy_file "$SHARE_DIR/config/snapper-root" "$TARGET/etc/snapper/configs/root"
+}
+
+configure_initramfs() {
+	local hooks='HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck)'
+	sed -i "s#^HOOKS=.*#$hooks#" "$TARGET/etc/mkinitcpio.conf"
+	chroot_run "$TARGET" mkinitcpio -P
+}
+
+configure_bootloader() {
+	local root_uuid
+	root_uuid="$(blkid -s UUID -o value "$ROOT_PART")"
+	append_once "GRUB_ENABLE_CRYPTODISK=y" "$TARGET/etc/default/grub"
+	sed -i "s#^GRUB_CMDLINE_LINUX=.*#GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=$root_uuid:$CRYPT_ROOT root=/dev/mapper/$CRYPT_ROOT rootflags=subvol=@\"#" "$TARGET/etc/default/grub"
+	chroot_run "$TARGET" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Raftix
+	chroot_run "$TARGET" grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+bootstrap_paru() {
+	chroot_run "$TARGET" sudo -u "$USERNAME" git clone https://aur.archlinux.org/paru.git /tmp/paru
+	chroot_run "$TARGET" sh -c "cd /tmp/paru && sudo -u $USERNAME makepkg -si --noconfirm"
+	chroot_run "$TARGET" rm -rf /tmp/paru
+}
+
+install_aur_packages() {
+	mapfile -t aur_packages < <(read_list "$SHARE_DIR/packages/aur.txt")
+	chroot_run "$TARGET" sudo -u "$USERNAME" paru -S --needed --noconfirm "${aur_packages[@]}"
+}
+
+install_dotforge() {
+	local home="/home/$USERNAME"
+	chroot_run "$TARGET" sudo -u "$USERNAME" git clone "$CONFIG_REPO" "$home/dotforge"
+	if [[ -x "$TARGET$home/dotforge/install.sh" ]]; then
+		chroot_run "$TARGET" sudo -u "$USERNAME" "$home/dotforge/install.sh"
+	fi
+
+	restore_ssh "$home"
+}
+
+restore_ssh() {
+	local home="$1"
+	local passphrase
+	passphrase="$(dialog_password "age" "Passphrase for SSH secret")"
+	chroot_run "$TARGET" install -d -m 700 -o "$USERNAME" -g "$USERNAME" "$home/.ssh"
+	printf '%s\n' "$passphrase" | chroot_run "$TARGET" sudo -u "$USERNAME" age -d -p -o "$home/.ssh/id_ed25519" "$home/dotforge/secrets/ssh/id_ed25519.age"
+	chroot_run "$TARGET" cp "$home/dotforge/secrets/ssh/id_ed25519.pub" "$home/.ssh/id_ed25519.pub"
+	chroot_run "$TARGET" chown "$USERNAME:$USERNAME" "$home/.ssh/id_ed25519" "$home/.ssh/id_ed25519.pub"
+	chroot_run "$TARGET" chmod 600 "$home/.ssh/id_ed25519"
+	chroot_run "$TARGET" chmod 644 "$home/.ssh/id_ed25519.pub"
+}
+
+install_mise_tools() {
+	while read -r tool; do
+		chroot_run "$TARGET" sudo -u "$USERNAME" mise use -g "$tool"
+	done <"$SHARE_DIR/packages/mise.txt"
+}
+
+configure_defaults() {
+	local home="$TARGET/home/$USERNAME"
+	chroot_run "$TARGET" install -d -o "$USERNAME" -g "$USERNAME" "/home/$USERNAME/.config"
+	copy_file "$SHARE_DIR/config/mimeapps.list" "$home/.config/mimeapps.list"
+	chroot_run "$TARGET" chown "$USERNAME:$USERNAME" "/home/$USERNAME/.config/mimeapps.list"
+	copy_file "$SHARE_DIR/config/greetd.toml" "$TARGET/etc/greetd/config.toml"
+	copy_exec "$REPO_ROOT/scripts/raftix" "$TARGET/usr/local/bin/raftix"
+}
+
+run_smoke_tests() {
+	chroot_run "$TARGET" raftix doctor
+}
+
+main() {
+	require_root
+	require_installer_tools
+	check_network
+	ask_profile
+	rank_mirrors
+	partition_target
+	format_and_mount
+	install_base
+	configure_base
+	configure_users
+	enable_install_sudo
+	configure_services
+	configure_snapper
+	configure_initramfs
+	configure_bootloader
+	bootstrap_paru
+	install_aur_packages
+	disable_install_sudo
+	install_dotforge
+	install_mise_tools
+	configure_defaults
+	run_smoke_tests
+	dialog_msg "Done" "Raftix installation finished. Reboot when ready."
+}
+
+main "$@"

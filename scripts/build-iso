@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
+PROFILE=raftix
+INIT=openrc
+WORKSPACE="${ARTOOLS_WORKSPACE:-$HOME/artools-workspace}"
+ISO_PROFILES="$WORKSPACE/iso-profiles"
+PROFILE_DIR="$ISO_PROFILES/$PROFILE"
+
+require_linux() {
+	[[ "$(uname -s)" == Linux ]] || die "Artix buildiso must run on Linux"
+}
+
+prepare_workspace() {
+	require_cmd buildiso
+	require_cmd git
+	mkdir -p "$WORKSPACE"
+
+	if [[ ! -d "$ISO_PROFILES/.git" ]]; then
+		git clone https://gitea.artixlinux.org/artix/iso-profiles.git "$ISO_PROFILES"
+	fi
+
+	git -C "$ISO_PROFILES" fetch origin
+	git -C "$ISO_PROFILES" checkout wip
+	git -C "$ISO_PROFILES" pull --ff-only
+
+	rm -rf "$PROFILE_DIR"
+	cp -a "$ISO_PROFILES/base" "$PROFILE_DIR"
+}
+
+install_overlay() {
+	local overlay="$PROFILE_DIR/live-overlay"
+	mkdir -p "$overlay/usr/local/bin" "$overlay/usr/local/share/raftix" "$overlay/root"
+	copy_exec "$REPO_ROOT/scripts/raftix-install" "$overlay/usr/local/bin/raftix-install"
+	copy_exec "$REPO_ROOT/scripts/raftix" "$overlay/usr/local/bin/raftix"
+	cp -a "$REPO_ROOT/scripts/lib" "$overlay/usr/local/bin/lib"
+	cp -a "$REPO_ROOT/share/raftix/." "$overlay/usr/local/share/raftix/"
+	cp -a "$REPO_ROOT/wallpapers" "$overlay/usr/local/share/raftix/wallpapers"
+	printf 'RAFTIX_SHARE_DIR=/usr/local/share/raftix raftix-install\n' >"$overlay/root/.zlogin"
+	printf 'RAFTIX_SHARE_DIR=/usr/local/share/raftix raftix-install\n' >"$overlay/root/.bash_profile"
+}
+
+build_iso() {
+	buildiso -p "$PROFILE" -i "$INIT"
+	local iso
+	iso="$(find "$WORKSPACE/iso" -type f -name '*.iso' | sort | tail -n 1)"
+	[[ -n "$iso" ]] || die "ISO not found"
+	local date_name
+	date_name="raftix-$(date +%Y.%m.%d)-x86_64.iso"
+	mkdir -p "$REPO_ROOT/dist"
+	cp "$iso" "$REPO_ROOT/dist/$date_name"
+	(cd "$REPO_ROOT/dist" && sha256sum "$date_name" >"$date_name.sha256")
+	log "built dist/$date_name"
+}
+
+main() {
+	require_linux
+	prepare_workspace
+	install_overlay
+	build_iso
+}
+
+main "$@"

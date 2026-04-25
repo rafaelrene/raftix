@@ -4,7 +4,7 @@ Goal: build Raftix as a personal Artix-based distribution that boots into a full
 
 ## Status
 
-Current focus: smoke tests.
+Current focus: implementation.
 
 ## Decisions
 
@@ -183,7 +183,8 @@ Current focus: smoke tests.
 
 ### 3. Installer Flow
 
-- Exact live package installation flow.
+- Validate exact Artix package/service names on a Linux/Artix build host.
+- Validate encrypted hibernate implementation.
 
 ### 4. System Defaults
 
