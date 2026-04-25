@@ -1,0 +1,1 @@
+- To consider any task done `mise run fmt`, `mise run lint`, and `mise run test` must all pass.
