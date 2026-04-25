@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 PROFILE=raftix
 INIT=openrc
-WORKSPACE="${ARTOOLS_WORKSPACE:-$HOME/artools-workspace}"
+WORKSPACE="${ARTOOLS_WORKSPACE:-/var/lib/artools}"
 ISO_PROFILES="$WORKSPACE/iso-profiles"
 PROFILE_DIR="$ISO_PROFILES/$PROFILE"
 
@@ -17,7 +17,16 @@ require_linux() {
 
 prepare_workspace() {
 	require_cmd buildiso
+	require_cmd findmnt
 	require_cmd git
+	local fstype
+	fstype="$(findmnt -no FSTYPE -T "$WORKSPACE" 2>/dev/null || true)"
+	case "$fstype" in
+	overlay | tmpfs | squashfs)
+		die "$WORKSPACE is on $fstype; buildiso needs an ext4/xfs/btrfs-backed writable filesystem"
+		;;
+	esac
+
 	mkdir -p "$WORKSPACE"
 
 	if [[ ! -d "$ISO_PROFILES/.git" ]]; then
