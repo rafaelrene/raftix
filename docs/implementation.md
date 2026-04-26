@@ -6,6 +6,7 @@
 - `mise run lint`: lint repo files.
 - `mise run test`: shell syntax checks and Bats tests when present.
 - `mise run build:iso`: build the ISO on Linux with Artix `buildiso`.
+- `mise run publish-iso`: copy built ISO from the Artix build VM to Proxmox ISO storage.
 
 ## Current Shape
 
@@ -13,6 +14,7 @@
 - `scripts/raftix`: installed-system maintenance command.
 - `scripts/build-iso`: Artix `buildiso` wrapper.
 - `scripts/proxmox/create-build-vm`: parameterized Proxmox helper for a UEFI build/test VM.
+- `scripts/proxmox/publish-iso`: publishes `/root/raftix/dist/<iso>` from the build VM to Proxmox.
 - `share/raftix/packages`: package manifests.
 - `share/raftix/config`: install-time config templates.
 
@@ -45,3 +47,13 @@ Optional variables:
 - `CORES`, default `8`.
 - `DISK_SIZE`, default `100` GiB. `100G` is accepted and normalized.
 - `BRIDGE`, default `vmbr0`.
+
+## Publish ISO Helper
+
+`scripts/proxmox/publish-iso` defaults to:
+
+- `PVE_HOST=root@192.168.86.25`
+- `BUILD_HOST=root@192.168.86.115`
+- `ISO_NAME=raftix-YYYY.MM.DD-x86_64.iso`
+- `BUILD_ISO_PATH=/root/raftix/dist/$ISO_NAME`
+- `PVE_ISO_DIR=/var/lib/vz/template/iso`

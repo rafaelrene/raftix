@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PVE_HOST="${PVE_HOST:-root@192.168.86.25}"
+PVE_SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/raftix_known_hosts)
+ISO_NAME="${ISO_NAME:-raftix-$(date +%Y.%m.%d)-x86_64.iso}"
+BUILD_ISO_PATH="${BUILD_ISO_PATH:-/root/raftix/dist/$ISO_NAME}"
+PVE_ISO_DIR="${PVE_ISO_DIR:-/var/lib/vz/template/iso}"
+
+die() {
+	printf 'error: %s\n' "$*" >&2
+	exit 1
+}
+
+main() {
+	[[ -f "$BUILD_ISO_PATH" ]] || die "missing build ISO: $BUILD_ISO_PATH"
+	ssh "${PVE_SSH_OPTS[@]}" "$PVE_HOST" mkdir -p "$PVE_ISO_DIR"
+	# shellcheck disable=SC2016
+	# shellcheck disable=SC2029
+	cat "$BUILD_ISO_PATH" | ssh "${PVE_SSH_OPTS[@]}" "$PVE_HOST" "cat > '$PVE_ISO_DIR/$ISO_NAME'"
+
+	local sha_path="$BUILD_ISO_PATH.sha256"
+	if [[ -f "$sha_path" ]]; then
+		# shellcheck disable=SC2016
+		# shellcheck disable=SC2029
+		cat "$sha_path" | ssh "${PVE_SSH_OPTS[@]}" "$PVE_HOST" "cat > '$PVE_ISO_DIR/$ISO_NAME.sha256'"
+	fi
+
+	# shellcheck disable=SC2029
+	ssh "${PVE_SSH_OPTS[@]}" "$PVE_HOST" "ls -lh '$PVE_ISO_DIR/$ISO_NAME' '$PVE_ISO_DIR/$ISO_NAME.sha256' 2>/dev/null || ls -lh '$PVE_ISO_DIR/$ISO_NAME'"
+}
+
+main "$@"

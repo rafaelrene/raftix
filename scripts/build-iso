@@ -54,7 +54,11 @@ install_overlay() {
 }
 
 build_iso() {
-	buildiso -p "$PROFILE" -i "$INIT"
+	WORKSPACE_DIR="$WORKSPACE" buildiso \
+		-p "$PROFILE" \
+		-i "$INIT" \
+		-r "$WORKSPACE/buildiso" \
+		-t "$WORKSPACE/iso"
 	local iso
 	iso="$(find "$WORKSPACE/iso" -type f -name '*.iso' | sort | tail -n 1)"
 	[[ -n "$iso" ]] || die "ISO not found"
