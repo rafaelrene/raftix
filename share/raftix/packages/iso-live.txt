@@ -1,0 +1,14 @@
+artix-archlinux-support
+base-devel
+btrfs-progs
+cryptsetup
+dialog
+dosfstools
+git
+gptfdisk
+grub
+networkmanager
+openssh
+pacman-contrib
+reflector
+sudo

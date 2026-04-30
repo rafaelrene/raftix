@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PVE_HOST="${PVE_HOST:-root@pve}"
+VMID="${VMID:-9001}"
+ISO_STORAGE="${ISO_STORAGE:-local}"
+ISO_NAME="${ISO_NAME:-raftix-$(date +%Y.%m.%d)-x86_64.iso}"
+
+main() {
+	# shellcheck disable=SC2029
+	ssh "$PVE_HOST" "qm set '$VMID' --ide2 '$ISO_STORAGE:iso/$ISO_NAME,media=cdrom' --boot 'order=ide2;scsi0;net0'"
+}
+
+main "$@"

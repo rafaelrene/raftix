@@ -19,6 +19,7 @@ prepare_workspace() {
 	require_cmd buildiso
 	require_cmd findmnt
 	require_cmd git
+	require_cmd yq
 	local fstype
 	fstype="$(findmnt -no FSTYPE -T "$WORKSPACE" 2>/dev/null || true)"
 	case "$fstype" in
@@ -42,7 +43,7 @@ prepare_workspace() {
 }
 
 install_overlay() {
-	local overlay="$PROFILE_DIR/live-overlay"
+	local overlay="$PROFILE_DIR/root-overlay"
 	mkdir -p "$overlay/usr/local/bin" "$overlay/usr/local/share/raftix" "$overlay/root"
 	copy_exec "$REPO_ROOT/scripts/raftix-install" "$overlay/usr/local/bin/raftix-install"
 	copy_exec "$REPO_ROOT/scripts/raftix" "$overlay/usr/local/bin/raftix"
@@ -51,6 +52,16 @@ install_overlay() {
 	cp -a "$REPO_ROOT/wallpapers" "$overlay/usr/local/share/raftix/wallpapers"
 	printf 'RAFTIX_SHARE_DIR=/usr/local/share/raftix raftix-install\n' >"$overlay/root/.zlogin"
 	printf 'RAFTIX_SHARE_DIR=/usr/local/share/raftix raftix-install\n' >"$overlay/root/.bash_profile"
+}
+
+install_live_packages() {
+	local profile_yaml="$PROFILE_DIR/profile.yaml"
+	local package
+
+	while read -r package; do
+		[[ -n "$package" ]] || continue
+		yq -i ".rootfs.packages += [\"$package\"] | .rootfs.packages |= unique" "$profile_yaml"
+	done <"$REPO_ROOT/share/raftix/packages/iso-live.txt"
 }
 
 build_iso() {
@@ -74,6 +85,7 @@ main() {
 	require_linux
 	prepare_workspace
 	install_overlay
+	install_live_packages
 	build_iso
 }
 

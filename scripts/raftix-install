@@ -127,7 +127,7 @@ repo_packages() {
 }
 
 install_base() {
-	local packages=(base linux linux-firmware openrc btrfs-progs cryptsetup dialog git grub mkinitcpio networkmanager sudo)
+	local packages=(base linux linux-firmware openrc elogind-openrc iptables-nft btrfs-progs cryptsetup dialog efibootmgr git grub mkinitcpio networkmanager sudo)
 	run basestrap "$TARGET" "${packages[@]}"
 	fstabgen -U "$TARGET" >>"$TARGET/etc/fstab"
 }
@@ -183,20 +183,30 @@ disable_install_sudo() {
 }
 
 configure_services() {
-	local services=(NetworkManager ufw chronyd bluetooth cupsd sshd greetd zramen)
+	local services=(NetworkManager ufw chrony bluetoothd cupsd sshd greetd zramen)
 	for service in "${services[@]}"; do
-		chroot_run "$TARGET" rc-update add "$service" default || true
+		if [[ -x "$TARGET/etc/init.d/$service" ]]; then
+			chroot_run "$TARGET" rc-update add "$service" default
+		fi
 	done
 
 	case "$POWER_MODE" in
-	laptop) chroot_run "$TARGET" rc-update add tlp default || true ;;
-	standard) chroot_run "$TARGET" rc-update add power-profiles-daemon default || true ;;
+	laptop)
+		[[ -x "$TARGET/etc/init.d/tlp" ]] && chroot_run "$TARGET" rc-update add tlp default
+		;;
 	esac
 }
 
 configure_snapper() {
-	chroot_run "$TARGET" snapper -c root create-config /
+	chroot_run "$TARGET" install -d -m 755 /etc/snapper/configs
 	copy_file "$SHARE_DIR/config/snapper-root" "$TARGET/etc/snapper/configs/root"
+	chroot_run "$TARGET" chmod 600 /etc/snapper/configs/root
+
+	if [[ -f "$TARGET/etc/conf.d/snapper" ]]; then
+		sed -i 's#^SNAPPER_CONFIGS=.*#SNAPPER_CONFIGS="root"#' "$TARGET/etc/conf.d/snapper"
+	else
+		printf 'SNAPPER_CONFIGS="root"\n' >"$TARGET/etc/conf.d/snapper"
+	fi
 }
 
 configure_initramfs() {
@@ -210,7 +220,9 @@ configure_bootloader() {
 	root_uuid="$(blkid -s UUID -o value "$ROOT_PART")"
 	append_once "GRUB_ENABLE_CRYPTODISK=y" "$TARGET/etc/default/grub"
 	sed -i "s#^GRUB_CMDLINE_LINUX=.*#GRUB_CMDLINE_LINUX=\"cryptdevice=UUID=$root_uuid:$CRYPT_ROOT root=/dev/mapper/$CRYPT_ROOT rootflags=subvol=@\"#" "$TARGET/etc/default/grub"
-	chroot_run "$TARGET" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Raftix
+	if ! chroot_run "$TARGET" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Raftix; then
+		chroot_run "$TARGET" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Raftix --removable --no-nvram
+	fi
 	chroot_run "$TARGET" grub-mkconfig -o /boot/grub/grub.cfg
 }
 

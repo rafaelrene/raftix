@@ -1,4 +1,6 @@
 cursor-bin
 helium-browser-bin
+mpvpaper
+swaylock-effects
 vicinae-bin
 zen-browser-bin

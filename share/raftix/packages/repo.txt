@@ -37,7 +37,6 @@ mkinitcpio
 mako
 mise
 mpv
-mpvpaper
 nautilus
 networkmanager
 networkmanager-openrc
@@ -53,7 +52,6 @@ pipewire-alsa
 pipewire-jack
 pipewire-pulse
 podman
-podman-openrc
 ripgrep
 sane
 slurp
@@ -61,9 +59,8 @@ snapper
 sudo
 swaybg
 swayidle
-swaylock-effects
 tmux
-tuigreet
+greetd-tuigreet
 ufw
 ufw-openrc
 waybar
